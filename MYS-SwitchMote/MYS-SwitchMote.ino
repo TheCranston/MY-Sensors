@@ -35,13 +35,35 @@
  * Added a watchdog in case something goes really sideways
  */
 
- // Enable debug prints to serial monitor
-// #define MY_DEBUG 
+// Enable debug prints to serial monitor
+#define MY_DEBUG 
+// Enable MY_DEBUG_VERBOSE flag for verbose debug prints. Requires DEBUG to be enabled.
+// This will add even more to the size of the final sketch!
+#define MY_DEBUG_VERBOSE
 
 // Enable and select radio type attached
 #define MY_RADIO_RFM69
+#define MY_IS_RFM69HW
+#define MY_RF69_IRQ_PIN RF69_IRQ_PIN
+#define MY_RF69_SPI_CS RF69_SPI_CS
+#define MY_RF69_IRQ_NUM RF69_IRQ_NUM
+#define MY_RFM69_NETWORKID     69
+#define MY_RFM69_ENABLE_ENCRYPTION
+//#define MY_RFM69_ENCRYPTKEY    "sampleEncryptKey" //exactly the same 16 characters/bytes on all nodes!
+//#define RFM69_ENCRYPTKEY MY_RFM69_ENCRYPTKEY
 
-#define USE_MOTEINO_LED 
+// Enables repeater functionality (relays messages from other nodes)
+#define MY_REPEATER_FEATURE
+
+// Flash leds on rx/tx/err
+#define MY_LEDS_BLINKING_FEATURE
+// Inverses the behavior of leds
+#define MY_WITH_LEDS_BLINKING_INVERSE
+// Set blinking period
+#define MY_DEFAULT_LED_BLINK_PERIOD 50
+#define MY_DEFAULT_ERR_LED_PIN 9  // Error led pin
+#define MY_DEFAULT_RX_LED_PIN  9  // Receive led pin
+#define MY_DEFAULT_TX_LED_PIN  9  // the PCB, on board LED
 
 #include <SPI.h>
 #include <MySensor.h>
@@ -51,7 +73,7 @@
 // #include <EEPROM.h> 
 
 #define SN "SwitchMote3"
-#define SV "1.0"
+#define SV "1.1.0"
 
 // Define Children IDs
 #define BUTTON1 1   // Id of the sensor child
@@ -77,9 +99,6 @@
 #define ON                  1
 #define OFF                 0
 
-//Switchmote only has a LED on the Moteino on pin 9 for RX/TX indication
-#define USE_MOTEINO_LED
-
 byte CurrentState[] = { false, false, false, false, 0 };
 byte NewState[] = { false, false, false, false, 0 };
 byte oldValue[] = { false, false, false, false };
@@ -95,7 +114,7 @@ byte outputs = B00000111 ;  // Default all RED LEDs illuminated
 byte btnIndex = 0;
 byte stateIndex = 0;
 
-MySensor gw; 
+// MySensor gw; 
 
 MyMessage NodeMessages[] = { 
   MyMessage(BUTTON1,V_LIGHT),
@@ -119,9 +138,10 @@ ISR(TIMER1_COMPB_vect){
 void setup()  
 {  
   // Whack the eeprom..  this is a workaround for borked nodes installed in the wall...
-  //for (int i=0;i<512;i++) {
-  //  EEPROM.write(i, 0xff);
-  //}
+  // for (int i=0;i<512;i++) {
+  //   EEPROM.write(i, 0xff);
+  // }
+  
   // Setup the LEDs, input pins and debouncer 
   for( byte i = 0; i < BTNCOUNT; i++)
   {
@@ -134,17 +154,6 @@ void setup()
   // Make sure relays are off when starting up (fixme: add logic to do multiple SSRs)
   pinMode(SSR0, OUTPUT);
   digitalWrite(SSR0, RELAY_OFF); // default off, just in case...
-  
-  gw.begin(incomingMessage, AUTO, true);
-  // Send the sketch version information to the gateway and Controller
-  gw.sendSketchInfo(SN, SV);
-
-  // Register all sensors to gw (they will be created as child devices)
-  gw.present(BUTTON1, S_LIGHT);  // Top Button
-  gw.present(BUTTON2, S_LIGHT);  // Middle Button
-  gw.present(BUTTON3, S_LIGHT);  // Bottom Button
-  gw.present(RELAY, S_BINARY);    // SSR0 as sperate entity
-  gw.present(DIMMER, S_DIMMER);   // LED Dimmer funciton for indicators on SwitchMote
 
   // Set up Timer 1 for 125Hz LED pulse to control brightness
   PRR &= ~_BV(PRTIM1);                  // Enable Timer1 Clock
@@ -158,11 +167,26 @@ void setup()
   // wdt_enable(WDTO_1S);  //  Call over the dog..
 }
 
+
+void presentation() {
+  // Send the Sketch Version Information to the Gateway
+  // Send the sketch version information to the gateway and Controller
+  sendSketchInfo(SN, SV);
+
+  // Register all sensors to gw (they will be created as child devices)
+  present(BUTTON1, S_LIGHT);  // Top Button
+  present(BUTTON2, S_LIGHT);  // Middle Button
+  present(BUTTON3, S_LIGHT);  // Bottom Button
+  present(RELAY, S_BINARY);    // SSR0 as sperate entity
+  present(DIMMER, S_DIMMER);   // LED Dimmer funciton for indicators on SwitchMote
+}
+
+
 void loop() 
 {
   // wdt_reset();  // pet the dog
 
-  gw.process(); // tickle the MySensors framework
+  // process(); // tickle the MySensors framework  - depricated in 1.6 forward
 
   check_buttons();  // update logical state from button changes
 
@@ -194,7 +218,7 @@ void update_mote() {
     } else if(stateIndex == 4) {
       brightness = map(CurrentState[stateIndex],0,100,0,1600);        // Case for the Dimmer     
     } else {
-      gw.send(NodeMessages[stateIndex].set(CurrentState[stateIndex]?true:false), true);  // Send new state and request ack back
+      send(NodeMessages[stateIndex].set(CurrentState[stateIndex]?true:false), true);  // Send new state and request ack back
       if(CurrentState[stateIndex]) {
         bitClear(outputs, 2-stateIndex); // turn off the red
         bitSet(outputs, 5-stateIndex); // turn on the green
@@ -206,7 +230,8 @@ void update_mote() {
   }
 }
 
-void incomingMessage(const MyMessage &message) {
+
+void receive(const MyMessage &message) {
   // We only expect one type of message from controller. But we better check anyway.
   if (!message.isAck()) {
     int ID = message.sensor; 
